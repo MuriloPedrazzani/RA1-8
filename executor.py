@@ -1,115 +1,112 @@
-def isNumero(token):
+"""
+Gerador de Assembly ARMv7 (CPULATOR) com suporte a IEEE754 64 bits
 
+Integrantes (ordem alfabética):
+Murilo Chandelier Pedrazzani - https://github.com/MuriloPedrazzani
+Ricardo Ryu Magalhães Makino - https://github.com/ryumakino
+Ricardo Vinicius Moreira Vianna - https://github.com/ricaprof
+
+Grupo no Canvas: RA1 8
+Disciplina: Construção de Interpretadores
+Professor: Frank Alcantara
+
+"""
+
+OPERADORES = {"+", "-", "*", "/", "//", "%", "^"}
+
+def is_numero(token):
     try:
-        float(token)
+        float(token) 
         return True
     except ValueError:
         return False
 
-def aplicar_operacao(op, a, b):
+def is_variavel(token):
+    return token.isalpha() and token.isupper() and token != "RES"
 
-    if op == "+":
-        return a + b
+def executarExpressao(tokens, historico, tabela_simbolos):
 
-    elif op == "-":
-        return a - b
+    pilha_semantica = []
 
-    elif op == "*":
-        return a * b
+    # Percorre todos os tokens gerados pelo lexer
+    for token in tokens:
 
-    elif op == "/":
+        if token == "(":
+            pilha_semantica.append("(")
 
-        if b == 0:
-            raise ZeroDivisionError("Divisão por zero")
-        return a / b
+        elif token == ")":
+            escopo = []
 
-    elif op == "//":
+            while pilha_semantica and pilha_semantica[-1] != "(":
+                escopo.insert(0, pilha_semantica.pop())
 
-        if b == 0:
-            raise ZeroDivisionError("Divisão inteira por zero")
-        return a // b
+            if not pilha_semantica:
+                raise ValueError("Erro Sintático: Parênteses desbalanceados.")
 
-    elif op == "%":
+            pilha_semantica.pop() 
 
-        if b == 0:
-            raise ZeroDivisionError("Módulo por zero")
-        return a % b
+            if len(escopo) == 3 and escopo[0][0] == "VAL" and escopo[1][0] == "VAL" and escopo[2][0] == "OP" and escopo[2][1] in OPERADORES:
+                operador = escopo[2][1]
+                divisor_literal = escopo[1][1]
 
-    elif op == "^":
+                if operador in ["/", "//", "%"]:
+                    if divisor_literal in ["0", "0.0", "-0", "-0.0"]:
+                        raise ValueError(f"Erro Semântico: Divisão por zero estática detectada no literal '{divisor_literal}'.")
 
-        if not float(b).is_integer() or b < 0:
-            raise ValueError("O expoente da potenciação deve ser um inteiro positivo")
+                pilha_semantica.append(("VAL", "resultado_simulado"))
 
-        return a ** int(b)
+            # Caso de uso do comando RES para acessar historico
+            elif len(escopo) == 2 and escopo[0][0] == "VAL" and escopo[1][0] == "RES":
+                try:
+                    n_val = int(float(escopo[0][1]))
+                except ValueError:
+                    raise ValueError(f"Erro Semântico: O índice para RES deve ser um número inteiro. Recebido: {escopo[0][1]}")
 
-    else:
+                # Verifica se existe valor suficiente no historico
+                if n_val < 0 or n_val >= len(historico):
+                    raise ValueError(f"Erro Semântico: Histórico insuficiente para ({n_val} RES). Linhas em histórico: {len(historico)}")
+                    
+                pilha_semantica.append(("VAL", "valor_historico"))
 
-        raise ValueError(f"Operador inválido: {op}")
+            elif len(escopo) == 2 and escopo[0][0] == "VAL" and escopo[1][0] == "VAR":
+                nome_var = escopo[1][1]
 
-def executarExpressao(tokens, historico, memoria):
+                tabela_simbolos[nome_var] = "alocado" 
+                pilha_semantica.append(("VAL", "valor_escrito"))
 
-    stack = []
+            elif len(escopo) == 1 and escopo[0][0] == "VAR":
+                nome_var = escopo[0][1]
 
-    # Percorre todos os tokens da expressão
-    for i, token in enumerate(tokens):
+                if nome_var not in tabela_simbolos:
+                    tabela_simbolos[nome_var] = "alocado_implicito"
 
-        if token in ("(", ")"):
-            continue
+                pilha_semantica.append(("VAL", "valor_lido"))
 
-        if isNumero(token):
-            stack.append(float(token))
+            elif len(escopo) == 1 and escopo[0][0] == "VAL":
+                pilha_semantica.append(escopo[0])
 
-        # Qualquer palavra maiuscula (exceto RES) é considerada variavel
-        elif isinstance(token, str) and token.isalpha() and token != "RES":
-
-            if i > 0 and tokens[i - 1] == "(":
-
-                valor = memoria.get(token, 0.0)
-                stack.append(valor)
-
+            # Caso a estrutura não corresponda a nenhuma regra valida
             else:
-                if not stack:
-                    raise ValueError("Sem valor na pilha para armazenar na memória")
+                tipos = [e[0] for e in escopo]
+                raise ValueError(f"Erro Semântico: Regra de formação RPN inválida neste escopo: {tipos}")
 
-                valor = stack.pop()
-                memoria[token] = valor
-                stack.append(valor)
+        elif is_numero(token):
+            pilha_semantica.append(("VAL", token))
 
         elif token == "RES":
+            pilha_semantica.append(("RES", "RES"))
 
-            # Precisa existir um valor na pilha indicando quantas linhas voltar
-            if not stack:
-                raise ValueError("RES sem valor de N na pilha")
+        elif is_variavel(token):
+            pilha_semantica.append(("VAR", token))
 
-            valor_n = stack.pop()
-
-            # Valida se o valor é inteiro não negativo
-            if not float(valor_n).is_integer() or valor_n < 0:
-                raise ValueError("RES exige inteiro não negativo")
-
-            n = int(valor_n)
-
-            # Verifica se existe historico suficiente
-            if n >= len(historico):
-                raise ValueError(f"Linha de histórico inacessível para {n} RES")
-
-            resultado_historico = historico[-(n + 1)]
-            stack.append(resultado_historico)
+        elif token in OPERADORES:
+            pilha_semantica.append(("OP", token))
 
         else:
+            raise ValueError(f"Erro Léxico/Semântico: Token desconhecido -> '{token}'")
 
-            # Operações matematicas exigem dois operandos
-            if len(stack) < 2:
-                raise ValueError(f"Operandos insuficientes para operador '{token}'")
+    # Ao final da analise a pilha deve ter apenas um valor resultante
+    if len(pilha_semantica) != 1 or pilha_semantica[0][0] != "VAL":
+        raise ValueError(f"Erro Estrutural: A expressão não pôde ser completamente resolvida. Pilha final -> {pilha_semantica}")
 
-            b = stack.pop()
-            a = stack.pop()
-
-            # Executa a operação e empilha o resultado
-            resultado = aplicar_operacao(token, a, b)
-            stack.append(resultado)
-
-    if len(stack) != 1:
-        raise ValueError("Expressão mal formada (sobraram valores na pilha)")
-
-    return stack[0]
+    return "Válida (Resolvido para Assembly)"
